@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-ink-900 antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+.font-num {
+  @apply font-mono tabular-nums;
+}
+
+/* thin, quiet scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #E1E2EC;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
