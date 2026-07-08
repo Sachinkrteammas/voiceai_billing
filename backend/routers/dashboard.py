@@ -6,7 +6,7 @@ from db import get_db4,get_db2
 from decimal import Decimal
 
 router = APIRouter(
-    prefix="/dashboard",
+    prefix="/api/dashboard",
     tags=["Dashboard"]
 )
 
