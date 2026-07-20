@@ -1,9 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Search, Download, WalletCards, ArrowDownRight, ArrowUpRight } from 'lucide-react'
 import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
 import EmptyState from '../components/EmptyState'
-import { walletSummary, walletTransactions, formatINR, formatINRWhole } from '../data/mockData'
+// import { walletSummary, walletTransactions, formatINR, formatINRWhole } from '../data/mockData'
+import { formatINR } from '../data/mockData'
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
+
+import {
+  getWalletSummary,
+  getWalletTransactions,
+} from "../services/walletApi";
 
 const typeStyles = {
   Recharge: 'bg-success/10 text-success',
@@ -19,17 +27,101 @@ const healthStyles = {
 }
 
 export default function Wallet() {
-  const [search, setSearch] = useState('')
-  const health = healthStyles[walletSummary.health]
+    const [search, setSearch] = useState('')
+  const [walletSummary, setWalletSummary] = useState(null)
+  const [walletTransactions, setWalletTransactions] = useState([])
+  const [loading, setLoading] = useState(true)
 
-  const rows = useMemo(
-    () =>
-      walletTransactions.filter(
-        (t) =>
-          t.type.toLowerCase().includes(search.toLowerCase()) || t.ref.toLowerCase().includes(search.toLowerCase())
-      ),
-    [search]
+const rows = useMemo(
+  () =>
+    walletTransactions.filter(
+      (t) =>
+        (t.transaction_type || '')
+          .toLowerCase()
+          .includes(search.toLowerCase()) ||
+        (t.reference_id || '')
+          .toLowerCase()
+          .includes(search.toLowerCase())
+    ),
+  [walletTransactions, search]
+)
+
+
+
+useEffect(() => {
+  loadWallet();
+}, []);
+
+const loadWallet = async () => {
+  try {
+    setLoading(true)
+
+    const [summaryRes, transactionRes] = await Promise.all([
+      getWalletSummary(),
+      getWalletTransactions(),
+    ])
+
+    setWalletSummary(summaryRes.data)
+    setWalletTransactions(transactionRes.data)
+  } catch (error) {
+    console.log(error)
+  } finally {
+    setLoading(false)
+  }
+}
+if (loading || !walletSummary) {
+  return (
+    <Layout>
+      <div className="p-10">Loading...</div>
+    </Layout>
   )
+}
+
+const health = healthStyles[walletSummary.health]
+
+const exportToExcel = () => {
+  const excelData = rows.map((t) => ({
+    "Date & Time": new Date(t.created_at).toLocaleString("en-IN"),
+
+    "Transaction Type": t.transaction_type,
+
+    "Reference ID": t.reference_id || "",
+
+    Amount: t.amount,
+
+    Status: t.status,
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(excelData);
+
+  const workbook = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    worksheet,
+    "Wallet Transactions"
+  );
+
+  const excelBuffer = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+
+  const file = new Blob(
+    [excelBuffer],
+    {
+      type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
+    }
+  );
+
+  saveAs(
+    file,
+    `wallet-transactions-${new Date()
+      .toISOString()
+      .slice(0, 10)}.xlsx`
+  );
+};
 
   return (
     <Layout>
@@ -99,7 +191,7 @@ export default function Wallet() {
                 className="pl-8 pr-3 py-1.5 text-[13px] rounded-lg border border-ink-300/40 focus:outline-none focus:ring-2 focus:ring-brand-200 focus:border-brand-400 w-56"
               />
             </div>
-            <button className="flex items-center gap-1.5 text-[13px] font-medium border border-ink-300/40 rounded-lg px-3 py-1.5 hover:bg-ink-900/[0.03]">
+            <button onClick={exportToExcel} className="flex items-center gap-1.5 text-[13px] font-medium border border-ink-300/40 rounded-lg px-3 py-1.5 hover:bg-ink-900/[0.03]">
               <Download size={14} /> Export
             </button>
           </div>
@@ -121,13 +213,13 @@ export default function Wallet() {
             <tbody>
               {rows.map((t, i) => (
                 <tr key={i} className="border-b border-ink-300/10 last:border-0 hover:bg-ink-900/[0.015]">
-                  <td className="px-5 py-3 text-ink-700 font-num">{t.date}</td>
+                  <td className="px-5 py-3 text-ink-700 font-num">{new Date(t.created_at).toLocaleString('en-IN')}</td>
                   <td className="px-5 py-3">
-                    <span className={`inline-block text-[11.5px] font-medium px-2 py-0.5 rounded-md ${typeStyles[t.type]}`}>
-                      {t.type}
+                    <span className={`inline-block text-[11.5px] font-medium px-2 py-0.5 rounded-md ${typeStyles[t.transaction_type]}`}>
+                      {t.transaction_type}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-ink-500 font-num">{t.ref}</td>
+                  <td className="px-5 py-3 text-ink-500 font-num">{t.reference_id}</td>
                   <td
                     className={`px-5 py-3 font-num font-semibold flex items-center gap-1 ${
                       t.amount < 0 ? 'text-danger' : 'text-success'

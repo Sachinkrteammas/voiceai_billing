@@ -61,8 +61,9 @@ export default function Sidebar() {
 
 <nav className="px-3 py-4 space-y-0.5">
   {navItems.map(({ to, label, icon: Icon, end }) => {
-    // Dashboard is clickable
-    if (to === "/") {
+    const enabled = to === "/" || to === "/wallet";
+
+    if (enabled) {
       return (
         <NavLink
           key={to}
@@ -71,8 +72,8 @@ export default function Sidebar() {
           className={({ isActive }) =>
             `group flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-[13.5px] font-medium transition-colors ${
               isActive
-                ? 'bg-brand-50 text-brand-600'
-                : 'text-ink-500 hover:bg-ink-900/[0.03] hover:text-ink-900'
+                ? "bg-brand-50 text-brand-600"
+                : "text-ink-500 hover:bg-ink-900/[0.03] hover:text-ink-900"
             }`
           }
         >
@@ -82,23 +83,26 @@ export default function Sidebar() {
                 <Icon size={17} strokeWidth={2.1} />
                 {label}
               </span>
-              {isActive && <ChevronRight size={14} className="text-brand-500" />}
+
+              {isActive && (
+                <ChevronRight
+                  size={14}
+                  className="text-brand-500"
+                />
+              )}
             </>
           )}
         </NavLink>
       );
     }
 
-    // Other menus are read-only
     return (
       <div
         key={to}
-        className="flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-[13.5px] font-medium text-ink-400 cursor-not-allowed opacity-60"
+        className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[13.5px] font-medium text-ink-400 opacity-60 cursor-not-allowed"
       >
-        <span className="flex items-center gap-2.5">
-          <Icon size={17} strokeWidth={2.1} />
-          {label}
-        </span>
+        <Icon size={17} strokeWidth={2.1} />
+        {label}
       </div>
     );
   })}

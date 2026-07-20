@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers.dashboard import router as dashboard_router
 from routers.auth import router as auth_router
+from routers.wallet import router as wallet_router
 
 app = FastAPI(
     title="Voice AI Billing Dashboard",
@@ -19,6 +20,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
+app.include_router(wallet_router, prefix="/api")
 
 
 @app.get("/")
