@@ -1,10 +1,17 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from db import get_db2, get_db4
+from pydantic import BaseModel
+
+
+class RechargeWebhook(BaseModel):
+    company_name: str
+    amount: float
+
 
 router = APIRouter(
     prefix="/wallet",
@@ -26,7 +33,6 @@ def get_rate(db2):
     ).scalar()
 
     return float(rate or 4)
-
 @router.get("/summary")
 def wallet_summary(
     db: Session = Depends(get_db4),
@@ -42,9 +48,16 @@ def wallet_summary(
         """)
     ).scalar()
 
-    current_month = datetime.now().month
+    recharge = float(recharge or 0)
 
-    dashboard_minutes = db.execute(
+    # Fixed June usage
+    june_minutes = 2517
+
+    # Fixed usage for July 1–6
+    july_first_six_days_minutes = 1224
+
+    # Dynamic usage from July 7 onwards
+    dynamic_minutes = db.execute(
         text("""
             SELECT
                 IFNULL(
@@ -52,36 +65,17 @@ def wallet_summary(
                     0
                 )
             FROM dashboard_webhook_sokudu
-            WHERE MONTH(call_time) = MONTH(CURDATE())
-              AND YEAR(call_time) = YEAR(CURDATE())
+            WHERE call_time >= '2026-07-07'
         """)
     ).scalar()
 
-    dashboard_minutes = float(dashboard_minutes)
+    dynamic_minutes = float(dynamic_minutes or 0)
 
-    # Fixed values
-    june_minutes = 2517
-    july_total_minutes = 2386
-
-    missing_minutes = 0
-    this_month_minutes = dashboard_minutes
-
-    if current_month == 7:
-
-        # 1 Jul → 6 Jul data is missing
-        missing_minutes = round(
-            july_total_minutes - dashboard_minutes,
-            2
-        )
-
-        # Complete July usage
-        this_month_minutes = (
-            missing_minutes + dashboard_minutes
-        )
-
-    # June + current month total usage
+    # Total consumed minutes
     total_consumed_minutes = round(
-        june_minutes + this_month_minutes,
+        june_minutes
+        + july_first_six_days_minutes
+        + dynamic_minutes,
         2
     )
 
@@ -91,7 +85,7 @@ def wallet_summary(
     )
 
     current_balance = round(
-        float(recharge) - total_consumed_amount,
+        recharge - total_consumed_amount,
         2
     )
 
@@ -102,10 +96,10 @@ def wallet_summary(
 
     health_percent = (
         round(
-            (current_balance / float(recharge)) * 100,
+            (current_balance / recharge) * 100,
             2
         )
-        if recharge
+        if recharge > 0
         else 0
     )
 
@@ -124,18 +118,17 @@ def wallet_summary(
         "health": health,
         "healthPercent": health_percent,
 
-        # Extra values
         "juneMinutes": june_minutes,
-        "dashboardMinutes": dashboard_minutes,
-        "missingMinutes": missing_minutes,
-        "thisMonthMinutes": this_month_minutes,
+        "julyFirstSixDaysMinutes": july_first_six_days_minutes,
+        "dynamicMinutes": dynamic_minutes,
         "monthlyMinutes": total_consumed_minutes
     }
 
+
 @router.get("/transactions")
 def wallet_transactions(
-    db=Depends(get_db4),      # dashboard_webhook_sokudu
-    db2=Depends(get_db2)      # wallet_transactions
+    db=Depends(get_db4),
+    db2=Depends(get_db2)
 ):
     rate = get_rate(db2)
 
@@ -149,10 +142,11 @@ def wallet_transactions(
                 amount,
                 status
             FROM wallet_transactions
+            ORDER BY created_at DESC
         """)
     ).mappings().all()
 
-    # June hardcoded (2517 min)
+    # Fixed June usage
     june_row = {
         "created_at": "2026-06-30 23:59:59",
         "transaction_type": "Usage Deduction",
@@ -161,40 +155,21 @@ def wallet_transactions(
         "status": "Completed"
     }
 
-    # July total usage already known
-    july_total_minutes = 2386
+    # Fixed usage for July 1–6
+    july_first_six_days_minutes = 1224
 
-    # Current July usage present in DB (7 Jul onwards)
-    july_db_minutes = db.execute(
-        text("""
-            SELECT
-                IFNULL(
-                    ROUND(SUM(call_duration) / 60, 2),
-                    0
-                )
-            FROM dashboard_webhook_sokudu
-            WHERE YEAR(call_time) = YEAR(CURDATE())
-              AND MONTH(call_time) = MONTH(CURDATE())
-        """)
-    ).scalar()
-
-    july_db_minutes = float(july_db_minutes)
-
-    # Missing usage (1 Jul → 6 Jul)
-    missing_minutes = round(
-        july_total_minutes - july_db_minutes,
-        2
-    )
-
-    missing_row = {
+    july_row = {
         "created_at": "2026-07-06 23:59:59",
         "transaction_type": "Usage Deduction",
         "reference_id": "USG-2026-07-01-006",
-        "amount": round(-(missing_minutes * rate), 2),
+        "amount": round(
+            -(july_first_six_days_minutes * rate),
+            2
+        ),
         "status": "Completed"
     }
 
-    # Daily usage from DB (7 Jul onwards)
+    # Dynamic usage from July 7 onwards
     usage_rows = db.execute(
         text("""
             SELECT
@@ -220,7 +195,7 @@ def wallet_transactions(
 
             FROM dashboard_webhook_sokudu
 
-            WHERE call_time IS NOT NULL
+            WHERE call_time >= '2026-07-07'
 
             GROUP BY DATE(call_time)
 
@@ -234,7 +209,7 @@ def wallet_transactions(
     rows = (
         list(wallet_rows)
         + [june_row]
-        + [missing_row]
+        + [july_row]
         + list(usage_rows)
     )
 
@@ -244,3 +219,50 @@ def wallet_transactions(
     )
 
     return rows
+
+
+
+@router.post("/recharge")
+def recharge_wallet(
+    payload: RechargeWebhook,
+    db2: Session = Depends(get_db2)
+):
+    try:
+        db2.execute(
+            text("""
+                INSERT INTO wallet_transactions (
+                    company_name,
+                    transaction_type,
+                    amount,
+                    minutes,
+                    status
+                )
+                VALUES (
+                    :company_name,
+                    'Recharge',
+                    :amount,
+                    NULL,
+                    'Completed'
+                )
+            """),
+            {
+                "company_name": payload.company_name,
+                "amount": payload.amount
+            }
+        )
+
+        db2.commit()
+
+        return {
+            "success": True,
+            "message": "Recharge added successfully",
+            "company_name": payload.company_name,
+            "amount": payload.amount
+        }
+
+    except Exception as e:
+        db2.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
